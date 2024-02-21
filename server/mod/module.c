@@ -29,7 +29,7 @@ struct yoghurt_module *module_tryopen(const char *name, const char **custom_path
 
   // is the module present?
   for (int i = 0; i < ARRAY_LENGTH(module_paths); i++) {
-    char *path_tmp;
+    char path_tmp[1024];
     sprintf(path_tmp, "%s/%s", module_paths[i], name);
 
     DIR *dir = opendir(path_tmp);
@@ -44,14 +44,14 @@ struct yoghurt_module *module_tryopen(const char *name, const char **custom_path
 
   // if the module wasn't found, are there any custom paths to scan?
   if (found == 0) {
-    if (strncmp(custom_paths[0], "<none>", strlen("<none>")) == 0) {
+    if (strcmp(custom_paths[0], "<none>") == 0) {
       printf("Module '%s' was not found!\n", name);
       return NULL;
     }
 
     // try scanning custom paths
     for (int i = 0; i < ARRAY_LENGTH(custom_paths); i++) {
-      char *path_tmp;
+      char path_tmp[1024];
       sprintf(path_tmp, "%s/%s", custom_paths[i], name);
 
       DIR *dir = opendir(path_tmp);
@@ -71,7 +71,7 @@ struct yoghurt_module *module_tryopen(const char *name, const char **custom_path
   }
 
   // try to read manifest.json
-  char *manifest_filepath;
+  char manifest_filepath[1024];
   sprintf(manifest_filepath, "%s/manifest.json", module_path);
   FILE *manifest_file = fopen(manifest_filepath, "r");
   if (manifest_file == NULL) {
@@ -105,10 +105,38 @@ struct yoghurt_module *module_tryopen(const char *name, const char **custom_path
   // parse manifest.json
   cJSON *manifest = cJSON_Parse(manifest_content);
 
-  free(manifest_content);
+  // name mismatch
+  char *module_name = cJSON_GetObjectItem(manifest, "name")->valuestring;
+  if (strncmp(module_name, name, strlen(name)) != 0) {
+  printf("Name mismatch in module '%s' (manifest.json: '%s', actual: '%s')\n", name, module_name, name);
+    free(manifest_content);
+    return NULL;
+  }
+
+  // version
+  char *module_version = cJSON_GetObjectItem(manifest, "version")->valuestring;
+  if (strncmp(module_version, "(null)", strlen("(null)")) == 0) {
+    module_version = "Unknown";
+  }
+
+  // sha256
+  //if (strcmp(json_tmp->valuestring, yoghurt_256sum(manifest_content)) != 0) {
+  //  printf("SHA256 checksum mismatch between module and manifest.json!\n");
+  //  free(manifest_file);
+  //  return NULL;
+  //}
 
   // compose a dependency list
-  char **dependency_list = {"<none>"};
+  cJSON *dependencies = cJSON_GetObjectItem(manifest, "dependencies");
+  size_t dependency_list_size = cJSON_GetArraySize(dependencies);
+char **dependency_list = (char **)malloc(dependency_list_size * sizeof(char *));
+  for (int i = 0; i < dependency_list_size; i++) {
+    char *dependency_string = cJSON_GetArrayItem(dependencies, i)->valuestring;
+    dependency_list[i] = malloc(strlen(dependency_string));
+    strcpy(dependency_list[i], dependency_string);
+  }
+
+  free(manifest_content);
 
   struct yoghurt_module *new = malloc(sizeof(struct yoghurt_module));
   if (new == NULL) {
@@ -116,7 +144,17 @@ struct yoghurt_module *module_tryopen(const char *name, const char **custom_path
     return NULL;
   }
 
-  new->name = name;
-  new->dependencies = dependency_list;
+  new->name = (char *)name;
+  new->version = module_version;
+  new->dependencies = malloc(dependency_list_size * sizeof(char *));
+  memcpy(new->dependencies, dependency_list, dependency_list_size);
+
   return new;
+}
+
+void module_close(struct yoghurt_module *mod)
+{
+  dlclose(mod->handle);
+  free(mod->dependencies);
+  free(mod);
 }

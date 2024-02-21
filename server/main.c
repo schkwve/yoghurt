@@ -6,6 +6,10 @@
 
 int main(int argc, char **argv)
 {
-  printf("Hello, World!\n");
+  char *custom_paths[2] = {
+    "/Users/schkwve/yoghurt/build/modules",
+    ""
+};
+  module_tryopen("core", custom_paths);
   return 0;
 }
